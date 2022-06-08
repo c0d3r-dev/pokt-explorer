@@ -1,0 +1,182 @@
+﻿@page
+@using NodeOperations
+@model WebApp.Pages.PoktExplorerModel
+@{
+}
+
+
+
+@section Head
+{
+<link rel="stylesheet"
+	  href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.3/css/theme.bootstrap_4.min.css"
+	  integrity="sha512-2C6AmJKgt4B+bQc08/TwUeFKkq8CsBNlTaNcNgUmsDJSU1Fg+R6azDbho+ZzuxEkJnCjLZQMozSq3y97ZmgwjA=="
+	  crossorigin="anonymous" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/featherlight/1.7.13/featherlight.min.css"
+	  integrity="sha512-56GJrpSgHk6Mc9Fltt+bQKcICJoEpxtvozXPA5n5OT0rfWiqGlJmJCI/vl16kctf/0XbBloh03vl7OF2xFnR8g=="
+	  crossorigin="anonymous" />
+}
+
+@{
+	List<PoktClient.Tx> Txs = new();
+	try
+	{
+		if (Model.Query?.Length == 64)
+		{
+			Txs = new() { await PoktClient.QueryTxAsync(Model.Query) };
+		}
+		else
+		if (Model.Query?.Length == 40)
+		{
+			Txs = await PoktClient.QueryAccountTxsAsync(Model.Query, 1, Model.Top200 ? 200 : 10000, false, Model.NewestFirst);
+			if (Model.IncludeReceived)
+			{
+				Txs.AddRange(await PoktClient.QueryAccountTxsAsync(Model.Query, 1, Model.Top200 ? 200 : 10000, true, Model.NewestFirst));
+			}
+			Txs = Txs.Where(tx => Model.ShowAll || (tx.Code == 0 && tx.Type != "pocketcore/proof")).OrderByDescending(tx => tx.Height).ToList();
+		}
+	}
+	catch { }
+}
+
+
+
+<section>
+	<div class="container my-5 pt-5 pb-3">
+		<div class="row">
+			<div class="col">
+				<h1><i class="fas fa-archive"></i> Pokt Explorer</h1>
+
+				<label for="query">Wallet Address or Tx Hash</label>
+				<div class="input-group">
+					<input type="text" class="form-control" style="font-family:Courier New, Courier, monospace; font-weight:bold" id="query" value="@(Model.Query ?? "")">
+					<div class="input-group-append">
+						<button class="btn btn-primary" type="button" onclick="Search()"><i class="fas fa-magnifier"></i> Search</button>
+					</div>
+				</div>
+
+				<div class="ml-1 mt-1">
+					<div class="form-group form-check form-check-inline">
+						<input type="checkbox" class="form-check-input" id="top200" @(Model.Top200 ? "checked" : "")>
+						<label class="form-check-label" for="top200">Top 200 Only</label>
+					</div>
+					<div class="form-group form-check form-check-inline">
+						<input type="checkbox" class="form-check-input" id="newest" @(Model.NewestFirst ? "checked" : "")>
+						<label class="form-check-label" for="newest">Newest First</label>
+					</div>
+					<div class="form-group form-check form-check-inline">
+						<input type="checkbox" class="form-check-input" id="recv" @(Model.IncludeReceived ? "checked" : "")>
+						<label class="form-check-label" for="recv">Include Received</label>
+					</div>
+					<div class="form-group form-check form-check-inline">
+						<input type="checkbox" class="form-check-input" id="all" @(Model.ShowAll ? "checked" : "")>
+						<label class="form-check-label" for="all">Show All (Less Common Txs, Failed Txs)</label>
+					</div>
+				</div>
+
+				@if (Txs.Count() > 0)
+				{
+					<table class="table table-striped tablesorter">
+						<thead>
+							<tr>
+								<th>Tx Hash</th>
+								<th>Height</th>
+								<th>Type</th>
+								<th>From</th>
+								<th>To</th>
+								<th>Amount</th>
+								@if (Model.ShowAll)
+								{
+									<th>Code</th>
+								}
+								<th class="text-center">Other</th>
+							</tr>
+						</thead>
+						<tbody>
+							@foreach (var Cur in Txs)
+							{
+								<tr>
+									<td style="width:150px">
+										<i class="fas fa-clipboard" onclick="ToClipboard(this, '@Cur.Hash')" title="Copy tx-hash to clipboard"></i>
+										<span style="cursor:pointer" onclick="Expand(this, '@Cur.Hash')">@Cur.Hash.Substring(0, 4)...@Cur.Hash.Substring(60, 4)</span>
+									</td>
+									<td>@Cur.Height</td>
+									<td>@Cur.Type</td>
+									<td>
+										<span style="cursor:pointer" onclick="Expand(this, '@Cur.FromAddress')">@Cur.FromAddress?.Substring(0, 4)...@Cur.FromAddress?.Substring(36, 4)</span>
+									</td>
+									<td>
+										<span style="cursor:pointer" onclick="Expand(this, '@Cur.ToAddress')">@Cur.ToAddress?.Substring(0, 4)...@Cur.ToAddress?.Substring(36, 4)</span>
+									</td>
+									<td>@(Cur.Amount == 0 ? $"{Cur.TotalProofs} Relays" : $"{Cur.Amount / 1000000:N2} POKT")</td>
+									@if (Model.ShowAll)
+									{
+										<th>@Cur.Code</th>
+									}
+									<td class="text-center">
+										@if (!string.IsNullOrEmpty(Cur.Memo))
+										{
+											<i class="far fa-sticky-note" style="cursor:pointer" onclick="Expand(this, '@Cur.Memo')" title="Show Memo"></i>
+										}
+										<i class="fas fa-code ml-2" style="cursor:pointer" onclick="Expand(this, '@Cur.Raw')" title="Show Raw Tx Record"></i>
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+		</div>
+	</div>
+</section>
+
+
+
+@section Scripts
+{
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"
+		integrity="sha512-qTXRIMyZIFb8iQcfjXWCO8+M5Tbc38Qi5WzdPOYZHIlZpzBHG3L3by84BBBOiRGiEb7KKtAOAs5qYdUiZiQNNQ=="
+		crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.3/js/jquery.tablesorter.min.js"
+		integrity="sha512-qzgd5cYSZcosqpzpn7zF2ZId8f/8CHmFKZ8j7mU4OUXTNRd5g+ZHBPsgKEwoqxCtdQvExE5LprwwPAgoicguNg=="
+		crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/featherlight/1.7.13/featherlight.min.js"
+		integrity="sha512-0UbR6HN0dY8fWN9T7fF658896tsPgnbRREHCNq46J9/JSn8GonXDZmqtTc3qS879GM0zV49b9LPhdc/maKP8Kg=="
+		crossorigin="anonymous"></script>
+<script src="~/lib/jaml.js"></script>
+
+<script>
+	$(function () {
+		$(".tablesorter").tablesorter({ theme: 'bootstrap' });
+		$(".moment").each(function () {
+			$(this).text(moment($(this).data("moment")).calendar());
+		});
+	});
+
+	function Search() {
+		location = "/PoktExplorer?Query=" + $("#query").val()
+			+ "&Top200=" + $("#top200").is(':checked')
+			+ "&NewestFirst=" + $("#newest").is(':checked')
+			+ "&IncludeReceived=" + $("#recv").is(':checked')
+			+ "&ShowAll=" + $("#all").is(':checked');
+	}
+
+	function ToClipboard(Sender, Value) {
+		navigator.clipboard.writeText(Value);
+		$(Sender)
+			.hide()
+			.removeClass("fa-clipboard")
+			.addClass("fa-clipboard-check")
+			.fadeIn();
+		setTimeout(() => {
+			$(Sender)
+				.removeClass("fa-clipboard-check")
+				.addClass("fa-clipboard"); },
+			3000);
+	}
+
+	function Expand(Sender, Value) {
+		$.featherlight("<div class='container'>" + Value + "</div>");
+	}
+</script>
+}
